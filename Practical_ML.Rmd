@@ -1,0 +1,101 @@
+---
+title: "Practical ML Project"
+author: "Hunter Owen"
+date: "3/13/2022"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(caret)
+library(skimr)
+library(DMwR2) #KNN imputation
+#The goal of your project is to predict the manner in which they did the exercise. 
+#This is the "classe" variable in the training set. You may use any of the other 
+#variables to predict with. You should create a report describing how you built your
+#model, how you used cross validation, what you think the expected out of sample 
+#error is, and why you made the choices you did. You will also use your prediction
+#model to predict 20 different test cases.
+data <- read.csv("pml-training.csv")
+data <- data[,-1]
+table(data$classe)#check the classes
+#Splitting data into training and testing 
+inTrain <- createDataPartition(data$classe, p = 1/10)[[1]] #10% to 90% to save time
+training <- data[ inTrain,]
+testing <- data[-inTrain,]
+skim(data) #take a glance at the dataset and found quite a lot not useful variables
+#remove irrelevant variable columns
+training <- training[,-c(2:4)]
+testing <- testing[,-c(2:4)]
+#will preprocess using caret package 
+preprocess <- nearZeroVar(training)
+training <- training[, -preprocess]
+testing  <- testing[, -preprocess]
+skim(training) #still has missing, variables need removing
+#remove variables that have missingness
+training <- training[ , colSums(is.na(training)) == 0]
+testing <- testing[ , colSums(is.na(testing)) == 0]
+#check using skim
+skim(training)
+#turn classe into factors
+training$classe <- as.factor(training$classe)
+testing$classe <- as.factor(testing$classe)
+#Try LASSO first because it controls for multicollearity and is easy to interpret
+#and serve as a baseline model 
+#set train control 
+fitControl1 <- trainControl(method = "cv") 
+#use cv to estimate out-of-sample error and select the best model
+set.seed(123)
+lasso <- train(classe ~. , data=training, 
+             method = "glmnet", trControl = fitControl1, 
+            tuneGrid=expand.grid(.alpha=1, .lambda=seq(0.001, 0.1,by = 0.001)), 
+            metric = "Accuracy", verbose = FALSE)
+#get accuracy on testing data 
+lasso_pred_testing <- predict(lasso, newdata = testing)
+confusionMatrix(reference = testing$classe, data = lasso_pred_testing)
+#out of sample error rate is 1-0.97 = .3
+#fit higher-performing models 
+#Random Forest
+set.seed(123)
+#set grid tuning for hyperparameter selection using cv
+rfGrid <- expand.grid(.mtry=c(1:15))
+rf <- train(classe~., data=training, method="rf", trControl = fitControl1,
+           metric = "Accuracy", tuneGrid = rfGrid, verbose = FALSE)
+#get accuracy ontesting data 
+rf_pred_testing <- predict(rf, newdata = testing)
+confusionMatrix(reference = testing$classe, data = rf_pred_testing)
+#out of sample error rate is 1 - .98 = .02
+#Boosting GBM
+set.seed(123)
+#set grid tuning for hyperparameter selection using cv
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                        n.trees = (1:30)*50, 
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+bst <- train(classe~., data=training, method="gbm", trControl = fitControl1,
+             tuneGrid = gbmGrid,verbose = FALSE)
+bst
+#get accuracy on testing data 
+bst_pred_testing <- predict(bst, newdata = testing)
+confusionMatrix(reference = testing$classe, data = bst_pred_testing)
+#out of sample error rate is 1 - .98 = .02
+```
+
+Analytic plan
+
+In order to uncover hidden patterns of the assigned data set and make highly accurate predictions, the researcher went through several steps: (a) data splitting; (b) data preprocessing and data cleaning; (c) model building; (d) model selection; (e) model final validation. 
+
+Specifically, the researcher first split the assigned training data set into a training data set (10% of the whole data set) and a testing data set (90%). The reason why this decision was made is because of the time-consuming nature of modeling initial evaluation and selection when the sample size is too large. Given that the data set has consisted of almost 20,000 rows, the researcher believe that even with 10% of the data set chosen as the training data set, the produced models would be high-performing. 
+
+Secondly, because some columns of the data are either irrelevant or have near zero variance, the researcher removed the ones that are theoretically irrelevant such as
+time stamp as well as those that have near zero variance. In addition, because most machine learning algorithms could not handle missing data, the researcher removed the variable columns that have missingness, resulting in a total of 55  predictors.
+
+Moreover, the researcher conducted model building processes for three different 
+types of machine learning algorithms, namely LASSO, random forest, and gradient boosted model (GBM). The reason why LASSO was chosen was because of its higher interpretability. Because the LASSO approach is generally lower-performing compared to ensemble approaches like GBM and random forest, we predicted that the final LASSO model with the best lambda tune would not perform as well as the random forest model and the GBM model and therefore used lasso as a "baseline" model that can be compared to. In addition, in order to conduct hyper-parameter tuning for all three models, we conducted 10-fold cross-validation, which is the default, using the trainControl() function in the caret package for each model. 
+
+Fourthly, after model building, we would select the best model based on the accuracy metric, which then would finally be used to predict the outcomes of the validation data set which consists of 20 rows provided by the instructors in Coursera.
+
+Results
+
+As predicted, even a 10% of the whole data set as the training data set produced
+very accurate prediction results on the testing data set across all three models. Also in line with the researcher's prediction, LASSO performed the worst as measured by accuracy compared to both random forest and GBM. However, the difference was small: the accuracy of the LASSO model (97%) was only .1% lower than that of the GBM model as well as that of the random forest model, both of which exhibited an equally excellent accuracy of around 98%.
